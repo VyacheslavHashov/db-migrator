@@ -1,5 +1,6 @@
 {-# language OverloadedStrings #-}
 {-# language FlexibleContexts #-}
+{-# language GeneralizedNewtypeDeriving #-}
 
 module Database.Migrator where
 
@@ -10,45 +11,77 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Control.Monad
 import Control.Monad.State
-import Data.Tree
 import Data.Char (isAlphaNum)
+import Data.Word
+import Data.List (break)
 
-type MgNumber = Int
+newtype MgNumber = MgNumber Word64
+    deriving (Show, Eq, Ord)
 
+newtype MgFolder = MgFolder T.Text
+    deriving (Show, Eq, Ord)
+
+newtype MgDesc   = MgDesc T.Text
+    deriving (Show, Eq, Ord)
+
+newtype MigrationId = MigrationId T.Text
+    deriving (Show, Eq, Ord)
+
+-- TODO custom eq and ord
 data Migration = Migration
-    { mgFolder  :: T.Text
-    , mgName    :: T.Text
+    { mgFolder  :: MgFolder
+    , mgNumber  :: MgNumber
+    , mgDesc    :: MgDesc
     } deriving (Eq, Ord)
 
-instance Show Migration where
-    show m = T.unpack $ mgFolder m <> "." <> mgName m
+newtype CrossDeps = CrossDeps [MgList]
 
-type Deps = [Migration]
-type Node = Tree
+data MgNode = MgNode Migration CrossDeps
 
-type MgGraph = [Node Migration]
+type MgList = [MgNode]
 
-traverseGraph
-    :: MgGraph
-    -> (S.Set Migration -> Migration -> Bool)
-    -> State (S.Set Migration) [Migration]
-traverseGraph graph f = concat <$> traverse go graph
-  where
-    go (Node x ts) = do
-       s <- get
-       if (x `S.notMember` s) && f s x
-           then do
-             modify (S.insert x)
-             (<> [x]) . concat <$> mapM go ts
-           else pure []
+newtype MgGraph = MgGraph (M.Map MgFolder MgList)
+
+newtype MgIndex = MgIndex (M.Map Migration MgList)
+
+data RawMgNode = RawMgNode Migration [MigrationId]
+
+-- instance Show Migration where
+--     show m = T.unpack $ mgFolder m <> "." <> mgName m
+
+migrationId :: Migration -> MigrationId
+migrationId = undefined
+
+migrationFullname :: Migration -> T.Text
+migrationFullname = undefined
+
+
+buildPlan :: MgList -> State (S.Set Migration) [Migration]
+buildPlan [] = pure []
+buildPlan (MgNode x (CrossDeps deps):xs) = do
+    b <- gets (x `S.notMember`)
+    if b
+        then do
+            modify (S.insert x)
+            (<> [x]) . concat <$> traverse buildPlan (xs:deps)
+        else pure []
+
 
 getPath :: MgGraph -> [Migration]
-getPath g =  evalState (traverseGraph g (\_ _ -> True)) S.empty
+getPath (MgGraph g) =  evalState (fmap concat . traverse buildPlan $ M.elems g) S.empty
 
 
-makeGraph :: M.Map Migration Deps -> MgGraph
-makeGraph = undefined
+buildGraph :: M.Map MgFolder RawMgNode -> (MgGraph, MgIndex)
+buildGraph = undefined
 
+constructPlan :: MgGraph -> MgGraph -> [Migration] -> [Migration]
+constructPlan = undefined
+
+listMigrations :: MgGraph -> [MgFolder] -> M.Map MgFolder [Migration]
+listMigrations = undefined
+
+checkMigrations :: MgGraph -> Either () ()
+checkMigrations = undefined
 
 -- | All errors
 data Error
@@ -70,22 +103,26 @@ data Error
     -- | Migration file has no SQl commands
     | EmptyMigration
 
+-- | Error with migrations files
+data MigrationFileError = MigrationFileError
+
+-- | Errors in database with migrations
+data MigrationDatabaseError = MigrationDatabaseError
+
 -- | All warnings
 data Warning
     -- | Subfolders are ignored
     = IgnoredSubfolder
 
-data ParseError
-    = NoHeader
-    | InvalidFormat
+-- -- | Migration name should contain only alpha characters, dash and digits
+-- -- and its length must be non-zero
+-- isValidMgName :: T.Text -> Bool
+-- isValidMgName t = T.all (\c -> isAlphaNum c || c == '_') t && not (T.null t)
 
--- | Migration name should contain only alpha characters, dash and digits
--- and its length must be non-zero
-isValidMgName :: T.Text -> Bool
-isValidMgName t = T.all (\c -> isAlphaNum c || c == '_') t && not (T.null t)
-
--- parseMgName :: T.Text -> MigrationName
--- parseMgName = undefined
+-- -- TODO change to Either
+-- -- TODO test it
+-- parseFilename :: String -> Maybe Migration
+-- parseFilename s = undefined
 
 
 -- Config
@@ -103,10 +140,10 @@ readConfig = undefined
 
 -- Reads migrations
 
-readFromDisk :: IO ()
+readFromDisk :: IO (M.Map MgFolder RawMgNode)
 readFromDisk = undefined
 
-readFromDB :: IO ()
+readFromDB :: IO (M.Map MgFolder RawMgNode)
 readFromDB = undefined
 
 -- | Create table for migrations in database
@@ -125,25 +162,6 @@ applyMigration = undefined
 
 checkMigrations :: IO ()
 checkMigrations = undefined
-
--- client functions
-
--- | Creates new empty migration
-cliNew :: IO ()
-cliNew = undefined
-
--- | List all migrations
-cliList :: IO ()
-cliList = undefined
-
--- | Merge migrations
-cliMerge :: IO ()
-cliMerge = undefined
-
--- | Apply migrations
-cliApply :: IO ()
-cliApply = undefined
-
 
 -- File system
 
