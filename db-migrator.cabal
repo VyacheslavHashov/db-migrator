@@ -1,4 +1,4 @@
-name:                db
+name:                db-migrator
 version:             0.1.0.0
 synopsis:            Database migrator for Postgres
 homepage:            https://github.com/vyacheslavhashov/db-migrator#readme
@@ -21,6 +21,7 @@ library
                        , text
                        , bytestring
                        , time
+                       
   default-language:    Haskell2010
 
 executable db-migrator-exe
