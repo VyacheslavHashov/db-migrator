@@ -25,3 +25,7 @@ mc = reverse [c1, c2, c3, c4, c5]
 graph :: MgGraph
 graph = M.fromList [("A", ma), ("B", mb), ("C", mc)]
 
+-- TODO test for filenames
+-- TODO test for file header
+-- TODO test for reading migrations from disk
+

@@ -21,6 +21,10 @@ library
                        , text
                        , bytestring
                        , time
+                       , directory
+                       , filepath
+                       , filemanip
+                       , unix-compat
                        
   default-language:    Haskell2010
 

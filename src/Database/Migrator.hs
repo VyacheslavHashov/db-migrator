@@ -9,14 +9,23 @@ import qualified Data.Text as T
 import qualified Data.ByteString as B
 import qualified Data.Map as M
 import qualified Data.Set as S
+import Data.Char (toLower)
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad
 import Control.Monad.State
 import Data.Char (isAlphaNum)
 import Data.Word
-import Data.List (break)
+import Data.List (break, stripPrefix)
+import System.FilePath
+import System.Directory
+import Control.Monad.Except
+import Text.Read (readMaybe)
+import Data.Maybe (fromMaybe)
+-- import qualified System.FilePath.Find as F
+import qualified System.PosixCompat.Files as F
 
 newtype MgNumber = MgNumber Word64
-    deriving (Show, Eq, Ord)
+    deriving (Show, Eq, Ord, Read)
 
 newtype MgFolder = MgFolder T.Text
     deriving (Show, Eq, Ord)
@@ -102,17 +111,22 @@ data Error
     | DuplicateName
     -- | Migration file has no SQl commands
     | EmptyMigration
+    deriving (Show)
 
 -- | Error with migrations files
-data MigrationFileError = MigrationFileError
+data MigrationFileError
+    = InvalidFilename T.Text
+    deriving (Show)
 
 -- | Errors in database with migrations
 data MigrationDatabaseError = MigrationDatabaseError
+    deriving (Show)
 
 -- | All warnings
 data Warning
     -- | Subfolders are ignored
     = IgnoredSubfolder
+    deriving (Show)
 
 -- -- | Migration name should contain only alpha characters, dash and digits
 -- -- and its length must be non-zero
@@ -140,8 +154,6 @@ readConfig = undefined
 
 -- Reads migrations
 
-readFromDisk :: IO (M.Map MgFolder RawMgNode)
-readFromDisk = undefined
 
 readFromDB :: IO (M.Map MgFolder RawMgNode)
 readFromDB = undefined
@@ -158,23 +170,52 @@ createMigrationTable = undefined
 applyMigration :: IO ()
 applyMigration = undefined
 
--- Check migrations
-
-checkMigrations :: IO ()
-checkMigrations = undefined
-
+---------
 -- File system
 
--- | List files in directory with extensios .sql or .pgsql
-listMigrations :: IO ()
-listMigrations = undefined
 
--- | Extract name without extension
-extractName :: IO ()
-extractName = undefined
+type FileM = ExceptT MigrationFileError IO
+
+-- reads all the migrations from the disk
+readFromDisk :: FileM (M.Map MgFolder RawMgNode)
+readFromDisk = do
+    dir <- liftIO getCurrentDirectory
+    folders <- liftIO $ listDirectory dir >>= filterM isDirectory
+    liftIO $ print folders
+    traverse listFiles folders
+    undefined
+
+-- | List files in directory with extensios .sql or .pgsql
+-- listFiles :: FilePath -> ExceptT MigrationFileError IO [RawMgNode]
+listFiles :: FilePath -> ExceptT MigrationFileError IO ()
+listFiles path = do
+    files <- liftIO $ listDirectory path >>=
+                      filterM (isMigrationFile . (path </>))
+    let names = takeBaseName <$> files
+    liftIO $ print names
+
+isDirectory :: FilePath -> IO Bool
+isDirectory = fmap F.isDirectory . F.getFileStatus
+
+isMigrationFile :: FilePath -> IO Bool
+isMigrationFile path = (isSQL &&) <$> isFile
+  where
+    isSQL  =  map toLower (takeExtension path) `elem` [".sql", ".pgsql"]
+    isFile = F.isRegularFile <$> F.getFileStatus path
+
+-- | Parse a filename in the parts of a migration name.
+-- Filename must start with a number followed by an optional description
+-- separated by the '_' symbol.
+parseFilename :: String -> Except MigrationFileError (MgNumber, MgDesc)
+parseFilename name = do
+    let (rnumber, rdesc) = break (== '_') name
+        desc = MgDesc . T.pack . fromMaybe "" $ stripPrefix "_" rdesc
+    case readMaybe rnumber of
+        Nothing -> throwError $ InvalidFilename $ T.pack name
+        Just n  -> pure (MgNumber n, desc)
 
 -- | Read header form migration file
 -- header must contain deps list
-parseHeader :: IO ()
+parseHeader :: B.ByteString -> Except MigrationFileError [MigrationId]
 parseHeader = undefined
 
