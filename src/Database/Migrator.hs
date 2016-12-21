@@ -65,7 +65,7 @@ migrationId :: Migration -> MigrationId
 migrationId = undefined
 
 migrationFullname :: Migration -> T.Text
-migrationFullname = undefined
+migrationFullname mg =  T.pack (show $ mgNumber mg) <> "_"
 
 
 buildPlan :: MgList -> State (S.Set Migration) [Migration]
@@ -89,11 +89,20 @@ buildGraph = undefined
 constructPlan :: MgGraph -> MgGraph -> [Migration] -> [Migration]
 constructPlan = undefined
 
+-- TODO count all the arguments
 listMigrations :: MgGraph -> [MgFolder] -> M.Map MgFolder [Migration]
-listMigrations = undefined
+listMigrations (MgGraph gr) _ =  fmap (fmap extractMg) gr
+  where
+    extractMg (MgNode mg _) = mg
 
 checkMigrations :: MgGraph -> Either () ()
 checkMigrations = undefined
+
+printMigrationList :: M.Map MgFolder [Migration] -> T.Text
+printMigrationList = M.foldMapWithKey f
+  where
+    f (MgFolder folder) xs = folder <> ":\n"
+        <> T.unlines (map migrationFullname xs )<> "\n"
 
 -- | All errors
 data Error
@@ -247,4 +256,27 @@ parseHeader s = do
     -- There are no deps
         Nothing -> pure []
         Just rest -> traverse parseDependency $ BC.split ',' rest
+
+-- TEST
+a1 = MgNode (Migration (MgFolder "a") (MgNumber 1) (MgDesc "a1") ) $ CrossDeps []
+a2 = MgNode (Migration (MgFolder "a") (MgNumber 2) (MgDesc "a2") ) $ CrossDeps []
+a3 = MgNode (Migration (MgFolder "a") (MgNumber 3) (MgDesc "a3") ) $ CrossDeps []
+a4 = MgNode (Migration (MgFolder "a") (MgNumber 4) (MgDesc "a4") ) $ CrossDeps [drop 2 mb]
+a5 = MgNode (Migration (MgFolder "a") (MgNumber 5) (MgDesc "a5") ) $ CrossDeps []
+b1 = MgNode (Migration (MgFolder "b") (MgNumber 1) (MgDesc "b1") ) $ CrossDeps []
+b2 = MgNode (Migration (MgFolder "b") (MgNumber 2) (MgDesc "b2") ) $ CrossDeps [mc]
+b3 = MgNode (Migration (MgFolder "b") (MgNumber 3) (MgDesc "b3") ) $ CrossDeps []
+b4 = MgNode (Migration (MgFolder "b") (MgNumber 4) (MgDesc "b4") ) $ CrossDeps [drop 2 mc]
+c1 = MgNode (Migration (MgFolder "c") (MgNumber 1) (MgDesc "c1") ) $ CrossDeps []
+c2 = MgNode (Migration (MgFolder "c") (MgNumber 2) (MgDesc "c2") ) $ CrossDeps []
+c3 = MgNode (Migration (MgFolder "c") (MgNumber 3) (MgDesc "c3") ) $ CrossDeps []
+c4 = MgNode (Migration (MgFolder "c") (MgNumber 4) (MgDesc "c4") ) $ CrossDeps []
+c5 = MgNode (Migration (MgFolder "c") (MgNumber 5) (MgDesc "c5") ) $ CrossDeps []
+
+ma = reverse [a1, a2, a3, a4, a5]
+mb = reverse [b1, b2, b3, b4]
+mc = reverse [c1, c2, c3, c4, c5]
+
+graph :: MgGraph
+graph = MgGraph $ M.fromList [(MgFolder "A", ma), (MgFolder "B", mb), (MgFolder "C", mc)]
 
