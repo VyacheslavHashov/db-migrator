@@ -6,14 +6,16 @@ module Database.Migrator where
 
 import Data.Monoid
 import qualified Data.Text as T
+import           Data.Text.Encoding (decodeUtf8)
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Char (toLower)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad
 import Control.Monad.State
-import Data.Char (isAlphaNum)
+import Data.Char (isAlphaNum, isSpace)
 import Data.Word
 import Data.List (break, stripPrefix)
 import System.FilePath
@@ -33,7 +35,7 @@ newtype MgFolder = MgFolder T.Text
 newtype MgDesc   = MgDesc T.Text
     deriving (Show, Eq, Ord)
 
-newtype MigrationId = MigrationId T.Text
+data MigrationId = MigrationId MgFolder MgNumber
     deriving (Show, Eq, Ord)
 
 -- TODO custom eq and ord
@@ -116,6 +118,7 @@ data Error
 -- | Error with migrations files
 data MigrationFileError
     = InvalidFilename T.Text
+    | InvalidHeader
     deriving (Show)
 
 -- | Errors in database with migrations
@@ -203,7 +206,7 @@ isMigrationFile path = (isSQL &&) <$> isFile
     isSQL  =  map toLower (takeExtension path) `elem` [".sql", ".pgsql"]
     isFile = F.isRegularFile <$> F.getFileStatus path
 
--- | Parse a filename in the parts of a migration name.
+-- | Parses a filename in the parts of a migration name.
 -- Filename must start with a number followed by an optional description
 -- separated by the '_' symbol.
 parseFilename :: String -> Except MigrationFileError (MgNumber, MgDesc)
@@ -214,8 +217,27 @@ parseFilename name = do
         Nothing -> throwError $ InvalidFilename $ T.pack name
         Just n  -> pure (MgNumber n, desc)
 
+-- | Parses a single dependency
+-- format : <folder>.<number>_<desc>
+-- TODO desc should be optional
+-- TODO right validation and tests
+parseDependency :: B.ByteString -> Except MigrationFileError MigrationId
+parseDependency s = do
+    let s' = BC.takeWhile (not . isSpace) $ BC.dropWhile isSpace s
+        (folder, rest) = BC.break (== '.') s'
+        (rnumber, desc) = BC.break (== '_') rest
+    when (B.null folder) $ throwError InvalidHeader
+    case readMaybe (tail $ BC.unpack rnumber) of
+        Nothing -> throwError InvalidHeader
+        Just n -> pure $ MigrationId (MgFolder $ decodeUtf8 folder )
+                                     (MgNumber n)
+
 -- | Read header form migration file
 -- header must contain deps list
 parseHeader :: B.ByteString -> Except MigrationFileError [MigrationId]
-parseHeader = undefined
+parseHeader s = do
+    let s' = BC.dropWhile isSpace s
+    case BC.stripPrefix "-- cross-deps:" s' of
+        Nothing -> throwError InvalidHeader
+        Just rest -> traverse parseDependency $ BC.split ',' rest
 
