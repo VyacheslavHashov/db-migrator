@@ -43,7 +43,7 @@ data Migration = Migration
     { mgFolder  :: MgFolder
     , mgNumber  :: MgNumber
     , mgDesc    :: MgDesc
-    } deriving (Eq, Ord)
+    } deriving (Eq, Ord, Show)
 
 newtype CrossDeps = CrossDeps [MgList]
 
@@ -56,6 +56,7 @@ newtype MgGraph = MgGraph (M.Map MgFolder MgList)
 newtype MgIndex = MgIndex (M.Map Migration MgList)
 
 data RawMgNode = RawMgNode Migration [MigrationId]
+    deriving Show
 
 -- instance Show Migration where
 --     show m = T.unpack $ mgFolder m <> "." <> mgName m
@@ -180,22 +181,24 @@ applyMigration = undefined
 type FileM = ExceptT MigrationFileError IO
 
 -- reads all the migrations from the disk
-readFromDisk :: FileM (M.Map MgFolder RawMgNode)
+-- TODO dont count empty dirs
+readFromDisk :: FileM (M.Map MgFolder [RawMgNode])
 readFromDisk = do
     dir <- liftIO getCurrentDirectory
     folders <- liftIO $ listDirectory dir >>= filterM isDirectory
-    liftIO $ print folders
-    traverse listFiles folders
-    undefined
+    M.fromList <$> traverse (\f -> (\a -> (MgFolder (T.pack f),a)) <$> listFiles f) folders
 
--- | List files in directory with extensios .sql or .pgsql
--- listFiles :: FilePath -> ExceptT MigrationFileError IO [RawMgNode]
-listFiles :: FilePath -> ExceptT MigrationFileError IO ()
-listFiles path = do
-    files <- liftIO $ listDirectory path >>=
-                      filterM (isMigrationFile . (path </>))
-    let names = takeBaseName <$> files
-    liftIO $ print names
+-- | List files in directory with extensions .sql or .pgsql
+listFiles :: FilePath -> FileM [RawMgNode]
+listFiles folder = do
+    files <- liftIO $ listDirectory folder >>=
+                      filterM (isMigrationFile . (folder </>))
+    forM files $ \f -> do
+        let name = takeBaseName f
+        (number, desc) <- parseFilename name
+        let mg = Migration (MgFolder $ T.pack folder) number desc
+        mgids <- parseHeader =<< liftIO (B.readFile (folder </> f))
+        pure $ RawMgNode mg mgids
 
 isDirectory :: FilePath -> IO Bool
 isDirectory = fmap F.isDirectory . F.getFileStatus
@@ -209,7 +212,8 @@ isMigrationFile path = (isSQL &&) <$> isFile
 -- | Parses a filename in the parts of a migration name.
 -- Filename must start with a number followed by an optional description
 -- separated by the '_' symbol.
-parseFilename :: String -> Except MigrationFileError (MgNumber, MgDesc)
+parseFilename
+    :: MonadError MigrationFileError m => String -> m (MgNumber, MgDesc)
 parseFilename name = do
     let (rnumber, rdesc) = break (== '_') name
         desc = MgDesc . T.pack . fromMaybe "" $ stripPrefix "_" rdesc
@@ -221,7 +225,8 @@ parseFilename name = do
 -- format : <folder>.<number>_<desc>
 -- TODO desc should be optional
 -- TODO right validation and tests
-parseDependency :: B.ByteString -> Except MigrationFileError MigrationId
+parseDependency
+    :: MonadError MigrationFileError m => B.ByteString -> m MigrationId
 parseDependency s = do
     let s' = BC.takeWhile (not . isSpace) $ BC.dropWhile isSpace s
         (folder, rest) = BC.break (== '.') s'
@@ -234,10 +239,12 @@ parseDependency s = do
 
 -- | Read header form migration file
 -- header must contain deps list
-parseHeader :: B.ByteString -> Except MigrationFileError [MigrationId]
+parseHeader
+    :: MonadError MigrationFileError m => B.ByteString -> m [MigrationId]
 parseHeader s = do
     let s' = BC.dropWhile isSpace s
     case BC.stripPrefix "-- cross-deps:" s' of
-        Nothing -> throwError InvalidHeader
+    -- There are no deps
+        Nothing -> pure []
         Just rest -> traverse parseDependency $ BC.split ',' rest
 
