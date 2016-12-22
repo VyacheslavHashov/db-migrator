@@ -7,6 +7,7 @@ module Database.Migrator where
 import Data.Monoid
 import qualified Data.Text as T
 import           Data.Text.Encoding (decodeUtf8)
+import qualified Data.Text.IO as T
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map as M
@@ -82,9 +83,22 @@ buildPlan (MgNode x (CrossDeps deps):xs) = do
 getPath :: MgGraph -> [Migration]
 getPath (MgGraph g) =  evalState (fmap concat . traverse buildPlan $ M.elems g) S.empty
 
+data BuildState = BuildState
+    { bsRest :: M.Map MgFolder [RawMgNode]
+    , bsIndex :: MgIndex
+    }
 
-buildGraph :: M.Map MgFolder RawMgNode -> (MgGraph, MgIndex)
-buildGraph = undefined
+buildGraph :: M.Map MgFolder [RawMgNode] -> (MgGraph, MgIndex)
+buildGraph gr =
+  let (a, s) = runState (traverse buildFolder gr) initialState
+  in (MgGraph a, bsIndex s)
+  where
+    initialState = BuildState gr (MgIndex M.empty)
+    buildFolder :: [RawMgNode] -> State BuildState MgList
+    buildFolder [] = pure []
+    buildFolder (RawMgNode mg _ : xs) = do
+        let node = MgNode mg (CrossDeps [])
+        (node:) <$> buildFolder xs
 
 constructPlan :: MgGraph -> MgGraph -> [Migration] -> [Migration]
 constructPlan = undefined
@@ -140,16 +154,6 @@ data Warning
     -- | Subfolders are ignored
     = IgnoredSubfolder
     deriving (Show)
-
--- -- | Migration name should contain only alpha characters, dash and digits
--- -- and its length must be non-zero
--- isValidMgName :: T.Text -> Bool
--- isValidMgName t = T.all (\c -> isAlphaNum c || c == '_') t && not (T.null t)
-
--- -- TODO change to Either
--- -- TODO test it
--- parseFilename :: String -> Maybe Migration
--- parseFilename s = undefined
 
 
 -- Config
@@ -279,4 +283,11 @@ mc = reverse [c1, c2, c3, c4, c5]
 
 graph :: MgGraph
 graph = MgGraph $ M.fromList [(MgFolder "A", ma), (MgFolder "B", mb), (MgFolder "C", mc)]
+
+readAndPrint :: IO ()
+readAndPrint = do
+    r <- runExceptT readFromDisk
+    case r of
+        Left _ -> error "bad"
+        Right g -> T.putStr . printMigrationList . flip listMigrations [] . fst $ buildGraph g
 
