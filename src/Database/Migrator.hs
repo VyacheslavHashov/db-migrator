@@ -1,6 +1,7 @@
 {-# language OverloadedStrings #-}
 {-# language FlexibleContexts #-}
 {-# language GeneralizedNewtypeDeriving #-}
+{-# language TypeFamilies #-}
 
 module Database.Migrator where
 
@@ -15,6 +16,7 @@ import qualified Data.Set as S
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad
 import Control.Monad.State
+import Control.Applicative
 import Data.Char (isAlphaNum, isDigit, isSpace, toLower)
 import Data.Word
 import Data.List (break, stripPrefix)
@@ -25,18 +27,19 @@ import Text.Read (readMaybe)
 import Data.Maybe (fromMaybe)
 -- import qualified System.FilePath.Find as F
 import qualified System.PosixCompat.Files as F
+import qualified Text.Megaparsec as P
+import qualified Text.Megaparsec.Lexer as P
+import Text.Megaparsec.Prim (MonadParsec)
 
 -- | The sequental number of a migration.
 newtype MgNumber = MgNumber Word64
     deriving (Show, Eq, Ord, Read)
 
--- | The folder name where a migration is located. Must contain only alphabet
--- chars, digits and '_', '-'
+-- | The folder name where a migration is located.
 newtype MgFolder = MgFolder T.Text
     deriving (Show, Eq, Ord)
 
--- | The desription for a migration. Must contain only alphabet chars, digits
--- and '_', '-'
+-- | The desription for a migration.
 newtype MgDesc   = MgDesc T.Text
     deriving (Show, Eq, Ord)
 
@@ -69,7 +72,7 @@ makeMgFolder :: T.Text -> Maybe MgFolder
 makeMgFolder t | valid t   = Just $ MgFolder t
                | otherwise = Nothing
   where
-    valid = T.all (\c -> isAlphaNum c || c == '_' || c == '-')
+    valid = T.all allowedInMgFolder
 
 -- Build a migration's description validating that it contains only
 -- allowed symbols
@@ -77,7 +80,16 @@ makeMgDesc :: T.Text -> Maybe MgDesc
 makeMgDesc t | valid t   = Just $ MgDesc t
              | otherwise = Nothing
   where
-    valid = T.all (\c -> isAlphaNum c || c == '_' || c == '-')
+    valid = T.all allowedInMgDesc
+
+-- | The allowed characters in a migration folder name
+allowedInMgFolder :: Char -> Bool
+allowedInMgFolder c = isAlphaNum c || c == '_' || c == '-'
+
+-- | The allowed characters in a migration description
+allowedInMgDesc :: Char -> Bool
+allowedInMgDesc c = isAlphaNum c || c == '_' || c == '-'
+
 
 
 
@@ -254,6 +266,7 @@ parseFilename name =
     let (rnumber, rdesc) = break (== '_') name
     in (,) <$> readNumber rnumber <*> readDesc rdesc
   where
+    throwFilenameError :: MonadError MigrationFileError m => m a
     throwFilenameError = throwError $ InvalidFilename $ T.pack name
     readDesc ""        = pure $ MgDesc ""
     readDesc ['_']     = throwFilenameError
@@ -275,6 +288,34 @@ parseDependency s = do
         Nothing -> throwError InvalidHeader
         Just n -> pure $ MigrationId (MgFolder $ decodeUtf8 folder )
                                      (MgNumber n)
+
+-- Parsers
+
+-- | Parses a folder name that should contains only alphabet characters, digits
+-- and '_', '-'
+parserFolder :: (MonadParsec e s m, P.Token s ~ Char) => m MgFolder
+parserFolder = MgFolder . T.pack <$> P.some allowedChar
+  where allowedChar = P.satisfy (\c -> isAlphaNum c || c == '_' || c == '-')
+
+-- | Parses a migration description that should contains only alphabet
+-- characters, digits and '_', '-'
+parserDesc :: (MonadParsec e s m, P.Token s ~ Char) => m MgDesc
+parserDesc = MgDesc . T.pack <$> P.some allowedChar
+  where allowedChar = P.satisfy (\c -> isAlphaNum c || c == '_' || c == '-')
+
+parserNumber :: (MonadParsec e s m, P.Token s ~ Char) => m MgNumber
+parserNumber = MgNumber . fromInteger <$> P.integer
+
+-- | Parses a single dependency
+-- format : <folder>.<number>[_<desc>]
+parserDependency :: (MonadParsec e s m, P.Token s ~ Char) => m MigrationId
+parserDependency = do
+    folder <- parserFolder
+    P.char '.'
+    number <- parserNumber
+    P.optional (P.char '_' *> parserDesc)
+    pure $ MigrationId folder number
+
 
 -- | Read header form migration file
 -- header must contain deps list

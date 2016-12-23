@@ -25,6 +25,7 @@ library
                        , filepath
                        , filemanip
                        , unix-compat
+                       , megaparsec
                        
   default-language:    Haskell2010
 
@@ -52,8 +53,10 @@ test-suite db-migrator-test
                      , directory
                      , filepath
                      , filemanip
-                     , unix-compat
+                      , unix-compat
+                      , megaparsec
                      , hspec
+                     , hspec-megaparsec
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
 
