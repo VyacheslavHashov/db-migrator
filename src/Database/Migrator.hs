@@ -28,7 +28,7 @@ import Data.Maybe (fromMaybe)
 -- import qualified System.FilePath.Find as F
 import qualified System.PosixCompat.Files as F
 import qualified Text.Megaparsec as P
-import qualified Text.Megaparsec.Lexer as P
+import qualified Text.Megaparsec.Lexer as P (integer)
 import Text.Megaparsec.Prim (MonadParsec)
 
 -- | The sequental number of a migration.
@@ -316,6 +316,22 @@ parserDependency = do
     P.optional (P.char '_' *> parserDesc)
     pure $ MigrationId folder number
 
+parserDepList :: (MonadParsec e s m, P.Token s ~ Char) => m [MigrationId]
+parserDepList = do
+    skipSpace
+    P.string "--"
+    skipSpace
+    P.string "cross-deps:"
+    P.sepBy1 (skipSpace *> parserDependency <* skipSpace) (P.char ',') <* P.eol
+
+parserHeader :: (MonadParsec e s m, P.Token s ~ Char) => m [MigrationId]
+parserHeader = parserDepList
+
+-- | Just as @spaces@ from Megaparsec but does not consume newlines and
+-- carriage returns
+skipSpace :: (MonadParsec e s m, P.Token s ~ Char) => m ()
+skipSpace = P.skipMany (P.oneOf whitespaces P.<?> "white space")
+  where whitespaces = ['\t', '\f', '\v',' ']
 
 -- | Read header form migration file
 -- header must contain deps list

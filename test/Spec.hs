@@ -12,6 +12,7 @@ main :: IO ()
 main = hspec $ do
     testParsingHeaders
     testParserDependency
+    testParserHeader
 
 parse :: Parser a -> T.Text -> Either (P.ParseError Char P.Dec) a
 parse = flip P.parse ""
@@ -28,8 +29,6 @@ testParsingHeaders = describe "parseFilename" $ do
         assertLeft $ parseFilename "000_zero second"
         assertLeft $ parseFilename "0000_"
         assertLeft $ parseFilename "0000_zero.second"
--- TODO test for file header
--- TODO test for reading migrations from disk
 
 testParserDependency :: Spec
 testParserDependency = describe "parserDependency" $ do
@@ -43,6 +42,28 @@ testParserDependency = describe "parserDependency" $ do
         parse parserDependency `shouldFailOn` "base0000"
         parse parserDependency `shouldFailOn` "base.zero"
 
+testParserHeader :: Spec
+testParserHeader = describe "parserDepList" $ do
+    it "can parse single entry" $
+        parse parserHeader "  -- cross-deps: base.0000\n" `shouldParse`
+            [MigrationId (MgFolder "base") (MgNumber 0)]
+    it "can parse multi entries" $
+        parse parserHeader
+            "  -- cross-deps: base.0000, internal.0001\n"
+        `shouldParse`
+            [ MigrationId (MgFolder "base") (MgNumber 0)
+            , MigrationId (MgFolder "internal") (MgNumber 1)]
+
+    it "should fail on input without comma as separator" $
+        parse parserHeader `shouldFailOn`
+            "  -- cross-deps: base.0000 internal.0001\n"
+    it "should fail on input list after 'cross-deps' header" $
+        parse parserHeader `shouldFailOn`
+            "  -- cross-deps: \n"
+
+
+
+-- TODO test for reading migrations from disk
 
 -- Helpers
 assertRight :: (Show e, Show a) => Either e a -> Expectation
