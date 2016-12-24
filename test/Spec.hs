@@ -35,24 +35,52 @@ testParserDependency = describe "parserDependency" $ do
     it "can parse right migration id" $
         parse parserDependency "base.0000" `shouldParse`
             MigrationId (MgFolder "base") (MgNumber 0)
+
     it "can parse right migration id with description" $
         parse parserDependency "base.0000_zero" `shouldParse`
             MigrationId (MgFolder "base") (MgNumber 0)
+
     it "should fail on invalid inputs" $ do
         parse parserDependency `shouldFailOn` "base0000"
         parse parserDependency `shouldFailOn` "base.zero"
 
 testParserHeader :: Spec
-testParserHeader = describe "parserDepList" $ do
+testParserHeader = describe "parserHeader" $ do
     it "can parse single entry" $
         parse parserHeader "  -- cross-deps: base.0000\n" `shouldParse`
             [MigrationId (MgFolder "base") (MgNumber 0)]
+
     it "can parse multi entries" $
         parse parserHeader
             "  -- cross-deps: base.0000, internal.0001\n"
         `shouldParse`
             [ MigrationId (MgFolder "base") (MgNumber 0)
             , MigrationId (MgFolder "internal") (MgNumber 1)]
+
+    it "can parse with empty lines before" $ do
+        let s = T.unlines
+                [ "  "
+                , "\t  "
+                , "--comment"
+                , "--second"
+                , "  -- cross-deps: base.0000" ]
+        parse parserHeader s `shouldParse`
+            [MigrationId (MgFolder "base") (MgNumber 0)]
+
+    it "should parse only the first possible header" $ do
+        let s = T.unlines
+                [ "-- cross-deps: base.0000"
+                , "-- cross-deps: internal.0001"]
+        parse parserHeader s `shouldParse`
+            [MigrationId (MgFolder "base") (MgNumber 0)]
+
+    it "should ignore header after the non-empty lines" $
+        parse parserHeader "SELECT 1 \n-- cross-deps: internal.0001\n"
+            `shouldParse` []
+
+
+    it "should return empty list if header does not exist" $
+        parse parserHeader " -- comment \n SELECT 1;" `shouldParse` []
 
     it "should fail on input without comma as separator" $
         parse parserHeader `shouldFailOn`

@@ -28,7 +28,8 @@ import Data.Maybe (fromMaybe)
 -- import qualified System.FilePath.Find as F
 import qualified System.PosixCompat.Files as F
 import qualified Text.Megaparsec as P
-import qualified Text.Megaparsec.Lexer as P (integer)
+import qualified Text.Megaparsec.Text as P
+import qualified Text.Megaparsec.Lexer as P (integer, skipLineComment)
 import Text.Megaparsec.Prim (MonadParsec)
 
 -- | The sequental number of a migration.
@@ -256,6 +257,7 @@ isMigrationFile path = (isSQL &&) <$> isFile
     isSQL  =  map toLower (takeExtension path) `elem` [".sql", ".pgsql"]
     isFile = F.isRegularFile <$> F.getFileStatus path
 
+-- TODO rewrite with parser
 -- | Parses a filename in the parts of a migration name.
 --
 -- Filename must start with a number followed by an optional description
@@ -273,10 +275,9 @@ parseFilename name =
     readDesc ('_':xs)  = maybe throwFilenameError pure $ makeMgDesc $ T.pack xs
     readNumber = maybe throwFilenameError (pure . MgNumber) . readMaybe
 
+-- TODO change
 -- | Parses a single dependency
 -- format : <folder>.<number>_<desc>
--- TODO desc should be optional
--- TODO right validation and tests
 parseDependency
     :: MonadError MigrationFileError m => B.ByteString -> m MigrationId
 parseDependency s = do
@@ -316,16 +317,23 @@ parserDependency = do
     P.optional (P.char '_' *> parserDesc)
     pure $ MigrationId folder number
 
-parserDepList :: (MonadParsec e s m, P.Token s ~ Char) => m [MigrationId]
-parserDepList = do
-    skipSpace
-    P.string "--"
-    skipSpace
-    P.string "cross-deps:"
-    P.sepBy1 (skipSpace *> parserDependency <* skipSpace) (P.char ',') <* P.eol
-
+-- | Parses the header of a migration.
+-- The line with a dependency list should be the first non-empty line in the
+-- file. Otherwise it is assumed that the migration has no dependencies
+--
+-- Header's format: -- cross-deps: <dependency> (, <dependency)*
 parserHeader :: (MonadParsec e s m, P.Token s ~ Char) => m [MigrationId]
-parserHeader = parserDepList
+parserHeader = emptyLines *>
+               (P.try (prefix *> depList) <|>
+                P.notFollowedBy prefix *> pure [])
+  where
+    emptyLine  = P.notFollowedBy prefix *>
+                 skipSpace *> P.optional (P.skipLineComment "--" )
+    emptyLines = P.sepEndBy emptyLine (P.skipSome P.eol)
+    prefix     = skipSpace *> P.string "--" *> skipSpace *>
+                 P.string "cross-deps:"
+    depList    = P.sepBy1 (skipSpace *> parserDependency <* skipSpace)
+                 (P.char ',') <* (P.eof <|> void P.eol)
 
 -- | Just as @spaces@ from Megaparsec but does not consume newlines and
 -- carriage returns
@@ -333,6 +341,7 @@ skipSpace :: (MonadParsec e s m, P.Token s ~ Char) => m ()
 skipSpace = P.skipMany (P.oneOf whitespaces P.<?> "white space")
   where whitespaces = ['\t', '\f', '\v',' ']
 
+-- TODO change
 -- | Read header form migration file
 -- header must contain deps list
 parseHeader
