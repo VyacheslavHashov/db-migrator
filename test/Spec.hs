@@ -4,6 +4,7 @@ import Database.Migrator
 import Test.Hspec
 import Test.Hspec.Megaparsec
 import Data.Either
+import Data.Foldable
 import qualified Text.Megaparsec as P (parse, Dec, ParseError)
 import Text.Megaparsec.Text (Parser)
 import qualified Data.Text as T
@@ -12,28 +13,20 @@ main :: IO ()
 main = hspec $ do
     describe "Testing parsers" testParsers
 
+---------------
+-- Parsers
+---------------
+
 -- | Helper to deduce Parser type
 parse :: Parser a -> T.Text -> Either (P.ParseError Char P.Dec) a
 parse = flip P.parse ""
 
+-- | Tests all the parsers
 testParsers :: Spec
 testParsers = do
     testParserFilenameEnd
     testParserMigrationId
     testParserHeader
-
-testParsingHeaders :: Spec
-testParsingHeaders = describe "parseFilename" $ do
-    it "can parse name as only digits" $
-        assertRight $ parseFilename "0000"
-    it "can parse name with description" $
-        assertRight $ parseFilename "0000_zero"
-    it "should fail on invalid names" $ do
-        assertLeft $ parseFilename "0000zero"
-        assertLeft $ parseFilename "zero"
-        assertLeft $ parseFilename "000_zero second"
-        assertLeft $ parseFilename "0000_"
-        assertLeft $ parseFilename "0000_zero.second"
 
 testParserFilenameEnd :: Spec
 testParserFilenameEnd = describe "parserFilenameEnd" $ do
@@ -41,12 +34,14 @@ testParserFilenameEnd = describe "parserFilenameEnd" $ do
         parse parserFilenameEnd "0000" `shouldParse` (MgNumber 0, MgDesc "")
     it "can parse name with description" $
         parse parserFilenameEnd "0000_zero" `shouldParse` (MgNumber 0, MgDesc "zero")
-    it "should fail on invalid names" $ do
-        parse parserFilenameEnd  `shouldFailOn` "0000zero"
-        parse parserFilenameEnd  `shouldFailOn` "zero"
-        parse parserFilenameEnd  `shouldFailOn` "000_zero second"
-        parse parserFilenameEnd  `shouldFailOn` "0000_"
-        parse parserFilenameEnd  `shouldFailOn` "0000_zero.second"
+
+    it "should fail on invalid names" $
+        traverse_ (parse parserFilenameEnd `shouldFailOn`)
+            [ "0000zero"
+            , "zero"
+            , "000_zero second"
+            , "0000_"
+            , "0000_zero.second" ]
 
 testParserMigrationId :: Spec
 testParserMigrationId = describe "parserMigrationId" $ do
@@ -102,10 +97,10 @@ testParserHeader = describe "parserHeader" $ do
 
     it "should fail on input without comma as separator" $
         parse parserHeader `shouldFailOn`
-            "  -- cross-deps: base.0000 internal.0001\n"
+            "  -- cross-deps: base.0000 internal.0001"
     it "should fail on input list after 'cross-deps' header" $
         parse parserHeader `shouldFailOn`
-            "  -- cross-deps: \n"
+            "  -- cross-deps: "
 
 
 
