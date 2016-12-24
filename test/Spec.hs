@@ -10,12 +10,17 @@ import qualified Data.Text as T
 
 main :: IO ()
 main = hspec $ do
-    testParsingHeaders
-    testParserDependency
-    testParserHeader
+    describe "Testing parsers" testParsers
 
+-- | Helper to deduce Parser type
 parse :: Parser a -> T.Text -> Either (P.ParseError Char P.Dec) a
 parse = flip P.parse ""
+
+testParsers :: Spec
+testParsers = do
+    testParserFilenameEnd
+    testParserMigrationId
+    testParserHeader
 
 testParsingHeaders :: Spec
 testParsingHeaders = describe "parseFilename" $ do
@@ -30,19 +35,32 @@ testParsingHeaders = describe "parseFilename" $ do
         assertLeft $ parseFilename "0000_"
         assertLeft $ parseFilename "0000_zero.second"
 
-testParserDependency :: Spec
-testParserDependency = describe "parserDependency" $ do
+testParserFilenameEnd :: Spec
+testParserFilenameEnd = describe "parserFilenameEnd" $ do
+    it "can parse name as only digits" $
+        parse parserFilenameEnd "0000" `shouldParse` (MgNumber 0, MgDesc "")
+    it "can parse name with description" $
+        parse parserFilenameEnd "0000_zero" `shouldParse` (MgNumber 0, MgDesc "zero")
+    it "should fail on invalid names" $ do
+        parse parserFilenameEnd  `shouldFailOn` "0000zero"
+        parse parserFilenameEnd  `shouldFailOn` "zero"
+        parse parserFilenameEnd  `shouldFailOn` "000_zero second"
+        parse parserFilenameEnd  `shouldFailOn` "0000_"
+        parse parserFilenameEnd  `shouldFailOn` "0000_zero.second"
+
+testParserMigrationId :: Spec
+testParserMigrationId = describe "parserMigrationId" $ do
     it "can parse right migration id" $
-        parse parserDependency "base.0000" `shouldParse`
+        parse parserMigrationId "base.0000" `shouldParse`
             MigrationId (MgFolder "base") (MgNumber 0)
 
     it "can parse right migration id with description" $
-        parse parserDependency "base.0000_zero" `shouldParse`
+        parse parserMigrationId "base.0000_zero" `shouldParse`
             MigrationId (MgFolder "base") (MgNumber 0)
 
     it "should fail on invalid inputs" $ do
-        parse parserDependency `shouldFailOn` "base0000"
-        parse parserDependency `shouldFailOn` "base.zero"
+        parse parserMigrationId `shouldFailOn` "base0000"
+        parse parserMigrationId `shouldFailOn` "base.zero"
 
 testParserHeader :: Spec
 testParserHeader = describe "parserHeader" $ do

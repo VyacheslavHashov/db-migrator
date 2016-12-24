@@ -328,6 +328,14 @@ parserFilename :: (MonadParsec e s m, P.Token s ~ Char) => m (MgNumber, MgDesc)
 parserFilename = (,) <$> parserNumber
                      <*> P.option (MgDesc "") (P.char '_' *> parserDesc)
 
+-- | Parses a filename on the end of input
+parserFilenameEnd :: (MonadParsec e s m, P.Token s ~ Char) => m (MgNumber, MgDesc)
+parserFilenameEnd = parserFilename <* P.eof
+
+-- | Parses a folder name on the end of input
+parserFolderEnd :: (MonadParsec e s m, P.Token s ~ Char) => m MgFolder
+parserFolderEnd = parserFolder <* P.eof
+
 -- | Parses a migration id
 -- format : <folder>.<number>[_<desc>]
 parserMigrationId :: (MonadParsec e s m, P.Token s ~ Char) => m MigrationId
