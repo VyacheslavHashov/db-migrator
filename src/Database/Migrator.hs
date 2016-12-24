@@ -307,6 +307,12 @@ parserDesc = MgDesc . T.pack <$> P.some allowedChar
 parserNumber :: (MonadParsec e s m, P.Token s ~ Char) => m MgNumber
 parserNumber = MgNumber . fromInteger <$> P.integer
 
+-- | Parses a filename
+-- format : <number>[_<desc>]
+parserFilename :: (MonadParsec e s m, P.Token s ~ Char) => m (MgNumber, MgDesc)
+parserFilename = (,) <$> parserNumber
+                     <*> P.option (MgDesc "") (P.char '_' *> parserDesc)
+
 -- | Parses a single dependency
 -- format : <folder>.<number>[_<desc>]
 parserDependency :: (MonadParsec e s m, P.Token s ~ Char) => m MigrationId
