@@ -290,7 +290,21 @@ parseDependency s = do
         Just n -> pure $ MigrationId (MgFolder $ decodeUtf8 folder )
                                      (MgNumber n)
 
+-- TODO change
+-- | Read header form migration file
+-- header must contain deps list
+parseHeader
+    :: MonadError MigrationFileError m => B.ByteString -> m [MigrationId]
+parseHeader s = do
+    let s' = BC.dropWhile isSpace s
+    case BC.stripPrefix "-- cross-deps:" s' of
+    -- There are no deps
+        Nothing -> pure []
+        Just rest -> traverse parseDependency $ BC.split ',' rest
+
+-----------------
 -- Parsers
+-----------------
 
 -- | Parses a folder name that should contains only alphabet characters, digits
 -- and '_', '-'
@@ -304,6 +318,7 @@ parserDesc :: (MonadParsec e s m, P.Token s ~ Char) => m MgDesc
 parserDesc = MgDesc . T.pack <$> P.some allowedChar
   where allowedChar = P.satisfy (\c -> isAlphaNum c || c == '_' || c == '-')
 
+-- | Parses a migration number
 parserNumber :: (MonadParsec e s m, P.Token s ~ Char) => m MgNumber
 parserNumber = MgNumber . fromInteger <$> P.integer
 
@@ -313,10 +328,10 @@ parserFilename :: (MonadParsec e s m, P.Token s ~ Char) => m (MgNumber, MgDesc)
 parserFilename = (,) <$> parserNumber
                      <*> P.option (MgDesc "") (P.char '_' *> parserDesc)
 
--- | Parses a single dependency
+-- | Parses a migration id
 -- format : <folder>.<number>[_<desc>]
-parserDependency :: (MonadParsec e s m, P.Token s ~ Char) => m MigrationId
-parserDependency = do
+parserMigrationId :: (MonadParsec e s m, P.Token s ~ Char) => m MigrationId
+parserMigrationId = do
     folder <- parserFolder
     P.char '.'
     number <- parserNumber
@@ -338,7 +353,7 @@ parserHeader = emptyLines *>
     emptyLines = P.sepEndBy emptyLine (P.skipSome P.eol)
     prefix     = skipSpace *> P.string "--" *> skipSpace *>
                  P.string "cross-deps:"
-    depList    = P.sepBy1 (skipSpace *> parserDependency <* skipSpace)
+    depList    = P.sepBy1 (skipSpace *> parserMigrationId <* skipSpace)
                  (P.char ',') <* (P.eof <|> void P.eol)
 
 -- | Just as @spaces@ from Megaparsec but does not consume newlines and
@@ -347,17 +362,6 @@ skipSpace :: (MonadParsec e s m, P.Token s ~ Char) => m ()
 skipSpace = P.skipMany (P.oneOf whitespaces P.<?> "white space")
   where whitespaces = ['\t', '\f', '\v',' ']
 
--- TODO change
--- | Read header form migration file
--- header must contain deps list
-parseHeader
-    :: MonadError MigrationFileError m => B.ByteString -> m [MigrationId]
-parseHeader s = do
-    let s' = BC.dropWhile isSpace s
-    case BC.stripPrefix "-- cross-deps:" s' of
-    -- There are no deps
-        Nothing -> pure []
-        Just rest -> traverse parseDependency $ BC.split ',' rest
 
 -----------------------------
 -- TEST
