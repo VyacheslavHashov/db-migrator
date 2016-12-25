@@ -2,6 +2,7 @@
 {-# language FlexibleContexts #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language TypeFamilies #-}
+{-# language ScopedTypeVariables #-}
 
 module Database.Migrator where
 
@@ -176,7 +177,7 @@ data Error
 
 -- | Error with migrations files
 data MigrationFileError
-    = InvalidFilename T.Text
+    = InvalidFilename FilePath
     | InvalidHeader
     deriving (Show)
 
@@ -230,20 +231,25 @@ type FileM = ExceptT MigrationFileError IO
 
 -- reads all the migrations from the disk
 -- TODO dont count empty dirs
+-- TODO it does not check correctness of the nodes
 readFromDisk :: FileM (M.Map MgFolder [RawMgNode])
 readFromDisk = do
     dir <- liftIO getCurrentDirectory
     folders <- liftIO $ listDirectory dir >>= filterM isDirectory
     M.fromList <$> traverse (\f -> (\a -> (MgFolder (T.pack f),a)) <$> listFiles f) folders
 
--- | List files in directory with extensions .sql or .pgsql
+-- TODO maybe raise warnings if the extension is not SQL
+-- TODO maybe raise warnings if the item is not a file
+-- | List all the files in directory with extensions .sql or .pgsql
 listFiles :: FilePath -> FileM [RawMgNode]
 listFiles folder = do
     files <- liftIO $ listDirectory folder >>=
                       filterM (isMigrationFile . (folder </>))
     forM files $ \f -> do
         let name = takeBaseName f
-        (number, desc) <- parseFilename name
+        (number, desc) <- case P.parse parserFilenameEnd "" name of
+            Left (e::P.ParseError Char P.Dec) -> throwError $ InvalidFilename (folder </> f)
+            Right v -> pure v
         let mg = Migration (MgFolder $ T.pack folder) number desc
         mgids <- parseHeader =<< liftIO (B.readFile (folder </> f))
         pure $ RawMgNode mg mgids
@@ -256,24 +262,6 @@ isMigrationFile path = (isSQL &&) <$> isFile
   where
     isSQL  =  map toLower (takeExtension path) `elem` [".sql", ".pgsql"]
     isFile = F.isRegularFile <$> F.getFileStatus path
-
--- TODO rewrite with parser
--- | Parses a filename in the parts of a migration name.
---
--- Filename must start with a number followed by an optional description
--- separated by the '_' symbol.
-parseFilename
-    :: MonadError MigrationFileError m => String -> m (MgNumber, MgDesc)
-parseFilename name =
-    let (rnumber, rdesc) = break (== '_') name
-    in (,) <$> readNumber rnumber <*> readDesc rdesc
-  where
-    throwFilenameError :: MonadError MigrationFileError m => m a
-    throwFilenameError = throwError $ InvalidFilename $ T.pack name
-    readDesc ""        = pure $ MgDesc ""
-    readDesc ['_']     = throwFilenameError
-    readDesc ('_':xs)  = maybe throwFilenameError pure $ makeMgDesc $ T.pack xs
-    readNumber = maybe throwFilenameError (pure . MgNumber) . readMaybe
 
 -- TODO change
 -- | Parses a single dependency
