@@ -68,32 +68,6 @@ newtype MgIndex = MgIndex (M.Map Migration MgList)
 data RawMgNode = RawMgNode Migration [MigrationId]
     deriving Show
 
--- Build a migration folder validating that it contains only
--- allowed symbols
-makeMgFolder :: T.Text -> Maybe MgFolder
-makeMgFolder t | valid t   = Just $ MgFolder t
-               | otherwise = Nothing
-  where
-    valid = T.all allowedInMgFolder
-
--- Build a migration's description validating that it contains only
--- allowed symbols
-makeMgDesc :: T.Text -> Maybe MgDesc
-makeMgDesc t | valid t   = Just $ MgDesc t
-             | otherwise = Nothing
-  where
-    valid = T.all allowedInMgDesc
-
--- | The allowed characters in a migration folder name
-allowedInMgFolder :: Char -> Bool
-allowedInMgFolder c = isAlphaNum c || c == '_' || c == '-'
-
--- | The allowed characters in a migration description
-allowedInMgDesc :: Char -> Bool
-allowedInMgDesc c = isAlphaNum c || c == '_' || c == '-'
-
-
-
 
 migrationId :: Migration -> MigrationId
 migrationId = undefined
@@ -178,6 +152,7 @@ data Error
 -- | Error with migrations files
 data MigrationFileError
     = InvalidFilename FilePath
+    | InvalidFoldername FilePath
     | InvalidHeader
     deriving (Show)
 
@@ -232,6 +207,7 @@ type FileM = ExceptT MigrationFileError IO
 -- reads all the migrations from the disk
 -- TODO dont count empty dirs
 -- TODO it does not check correctness of the nodes
+-- TODO maybe raise warning if the items is not a folder and config file
 readFromDisk :: FileM (M.Map MgFolder [RawMgNode])
 readFromDisk = do
     dir <- liftIO getCurrentDirectory
@@ -242,17 +218,28 @@ readFromDisk = do
 -- TODO maybe raise warnings if the item is not a file
 -- | List all the files in directory with extensions .sql or .pgsql
 listFiles :: FilePath -> FileM [RawMgNode]
-listFiles folder = do
-    files <- liftIO $ listDirectory folder >>=
-                      filterM (isMigrationFile . (folder </>))
+listFiles folderPath = do
+    folder <- runParser
+        (const . throwError $ InvalidFoldername folderPath)
+        parserFolderEnd "" folderPath
+
+    files <- liftIO $ listDirectory folderPath >>=
+                      filterM (isMigrationFile . (folderPath </>))
     forM files $ \f -> do
         let name = takeBaseName f
-        (number, desc) <- case P.parse parserFilenameEnd "" name of
-            Left (e::P.ParseError Char P.Dec) -> throwError $ InvalidFilename (folder </> f)
-            Right v -> pure v
-        let mg = Migration (MgFolder $ T.pack folder) number desc
-        mgids <- parseHeader =<< liftIO (B.readFile (folder </> f))
-        pure $ RawMgNode mg mgids
+        (number, desc) <- runParser
+            (const . throwError $ InvalidFilename (folderPath </> f))
+            parserFilenameEnd "" name
+
+        mgids <- liftIO (T.readFile (folderPath </> f)) >>= runParser
+            (const ( throwError InvalidHeader))
+            parserHeader ""
+
+        pure $ RawMgNode (Migration folder number desc) mgids
+  where
+    runParser errHandler p name content = case P.parse p name content of
+        Left (e :: P.ParseError Char P.Dec) -> errHandler e
+        Right v                             -> pure v
 
 isDirectory :: FilePath -> IO Bool
 isDirectory = fmap F.isDirectory . F.getFileStatus
@@ -262,33 +249,6 @@ isMigrationFile path = (isSQL &&) <$> isFile
   where
     isSQL  =  map toLower (takeExtension path) `elem` [".sql", ".pgsql"]
     isFile = F.isRegularFile <$> F.getFileStatus path
-
--- TODO change
--- | Parses a single dependency
--- format : <folder>.<number>_<desc>
-parseDependency
-    :: MonadError MigrationFileError m => B.ByteString -> m MigrationId
-parseDependency s = do
-    let s' = BC.takeWhile (not . isSpace) $ BC.dropWhile isSpace s
-        (folder, rest) = BC.break (== '.') s'
-        (rnumber, desc) = BC.break (== '_') rest
-    when (B.null folder) $ throwError InvalidHeader
-    case readMaybe (tail $ BC.unpack rnumber) of
-        Nothing -> throwError InvalidHeader
-        Just n -> pure $ MigrationId (MgFolder $ decodeUtf8 folder )
-                                     (MgNumber n)
-
--- TODO change
--- | Read header form migration file
--- header must contain deps list
-parseHeader
-    :: MonadError MigrationFileError m => B.ByteString -> m [MigrationId]
-parseHeader s = do
-    let s' = BC.dropWhile isSpace s
-    case BC.stripPrefix "-- cross-deps:" s' of
-    -- There are no deps
-        Nothing -> pure []
-        Just rest -> traverse parseDependency $ BC.split ',' rest
 
 -----------------
 -- Parsers
@@ -306,7 +266,7 @@ parserDesc :: (MonadParsec e s m, P.Token s ~ Char) => m MgDesc
 parserDesc = MgDesc . T.pack <$> P.some allowedChar
   where allowedChar = P.satisfy (\c -> isAlphaNum c || c == '_' || c == '-')
 
--- | Parses a migration number
+-- | Parses a migration number that is unsigned integer
 parserNumber :: (MonadParsec e s m, P.Token s ~ Char) => m MgNumber
 parserNumber = MgNumber . fromInteger <$> P.integer
 
