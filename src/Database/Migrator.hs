@@ -7,6 +7,7 @@
 module Database.Migrator where
 
 import Data.Monoid
+import Data.Foldable
 import qualified Data.Text as T
 import           Data.Text.Encoding (decodeUtf8)
 import qualified Data.Text.IO as T
@@ -204,20 +205,19 @@ applyMigration = undefined
 
 type FileM = ExceptT MigrationFileError IO
 
--- reads all the migrations from the disk
--- TODO dont count empty dirs
 -- TODO it does not check correctness of the nodes
 -- TODO maybe raise warning if the items is not a folder and config file
-readFromDisk :: FileM (M.Map MgFolder [RawMgNode])
-readFromDisk = do
+-- | Reads all the migrations from the disk, but not check for consistency
+readRawFromDisk :: FileM (M.Map MgFolder [RawMgNode])
+readRawFromDisk = do
     dir <- liftIO getCurrentDirectory
     folders <- liftIO $ listDirectory dir >>= filterM isDirectory
-    M.fromList <$> traverse (\f -> (\a -> (MgFolder (T.pack f),a)) <$> listFiles f) folders
+    fold <$> traverse listFiles folders
 
 -- TODO maybe raise warnings if the extension is not SQL
 -- TODO maybe raise warnings if the item is not a file
 -- | List all the files in directory with extensions .sql or .pgsql
-listFiles :: FilePath -> FileM [RawMgNode]
+listFiles :: FilePath -> FileM (M.Map MgFolder [RawMgNode])
 listFiles folderPath = do
     folder <- runParser
         (const . throwError $ InvalidFoldername folderPath)
@@ -225,7 +225,7 @@ listFiles folderPath = do
 
     files <- liftIO $ listDirectory folderPath >>=
                       filterM (isMigrationFile . (folderPath </>))
-    forM files $ \f -> do
+    mgs <- forM files $ \f -> do
         let name = takeBaseName f
         (number, desc) <- runParser
             (const . throwError $ InvalidFilename (folderPath </> f))
@@ -236,6 +236,11 @@ listFiles folderPath = do
             parserHeader ""
 
         pure $ RawMgNode (Migration folder number desc) mgids
+
+    -- Empty directory should be ignored
+    pure $ if null mgs
+        then M.empty
+        else M.singleton folder mgs
   where
     runParser errHandler p name content = case P.parse p name content of
         Left (e :: P.ParseError Char P.Dec) -> errHandler e
