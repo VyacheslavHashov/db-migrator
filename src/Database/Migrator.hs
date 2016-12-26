@@ -14,6 +14,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map as M
 import qualified Data.Set as S
+import Data.String (IsString)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad
 import Control.Monad.State
@@ -39,11 +40,11 @@ newtype MgNumber = MgNumber Word64
 
 -- | The folder name where a migration is located.
 newtype MgFolder = MgFolder T.Text
-    deriving (Show, Eq, Ord)
+    deriving (Show, Eq, Ord, IsString)
 
 -- | The desription for a migration.
 newtype MgDesc   = MgDesc T.Text
-    deriving (Show, Eq, Ord)
+    deriving (Show, Eq, Ord, IsString)
 
 data MigrationId = MigrationId MgFolder MgNumber
     deriving (Show, Eq, Ord)
@@ -67,7 +68,6 @@ newtype MgIndex = MgIndex (M.Map Migration MgList)
 
 data RawMgNode = RawMgNode Migration [MigrationId]
     deriving Show
-
 
 migrationId :: Migration -> MigrationId
 migrationId = undefined
@@ -322,34 +322,20 @@ skipSpace = P.skipMany (P.oneOf whitespaces P.<?> "white space")
 -----------------------------
 -- TEST
 -----------------------------
-a1 = MgNode (Migration (MgFolder "a") (MgNumber 1) (MgDesc "a1") ) $
-        CrossDeps []
-a2 = MgNode (Migration (MgFolder "a") (MgNumber 2) (MgDesc "a2") ) $
-        CrossDeps []
-a3 = MgNode (Migration (MgFolder "a") (MgNumber 3) (MgDesc "a3") ) $
-        CrossDeps []
-a4 = MgNode (Migration (MgFolder "a") (MgNumber 4) (MgDesc "a4") ) $
-        CrossDeps [drop 2 mb]
-a5 = MgNode (Migration (MgFolder "a") (MgNumber 5) (MgDesc "a5") ) $
-        CrossDeps []
-b1 = MgNode (Migration (MgFolder "b") (MgNumber 1) (MgDesc "b1") ) $
-        CrossDeps []
-b2 = MgNode (Migration (MgFolder "b") (MgNumber 2) (MgDesc "b2") ) $
-        CrossDeps [mc]
-b3 = MgNode (Migration (MgFolder "b") (MgNumber 3) (MgDesc "b3") ) $
-        CrossDeps []
-b4 = MgNode (Migration (MgFolder "b") (MgNumber 4) (MgDesc "b4") ) $
-        CrossDeps [drop 2 mc]
-c1 = MgNode (Migration (MgFolder "c") (MgNumber 1) (MgDesc "c1") ) $
-        CrossDeps []
-c2 = MgNode (Migration (MgFolder "c") (MgNumber 2) (MgDesc "c2") ) $
-        CrossDeps []
-c3 = MgNode (Migration (MgFolder "c") (MgNumber 3) (MgDesc "c3") ) $
-        CrossDeps []
-c4 = MgNode (Migration (MgFolder "c") (MgNumber 4) (MgDesc "c4") ) $
-        CrossDeps []
-c5 = MgNode (Migration (MgFolder "c") (MgNumber 5) (MgDesc "c5") ) $
-        CrossDeps []
+a1 = MgNode (Migration  "a" (MgNumber 1) "a1" ) $ CrossDeps []
+a2 = MgNode (Migration  "a" (MgNumber 2) "a2" ) $ CrossDeps []
+a3 = MgNode (Migration  "a" (MgNumber 3) "a3" ) $ CrossDeps []
+a4 = MgNode (Migration  "a" (MgNumber 4) "a4" ) $ CrossDeps [drop 2 mb]
+a5 = MgNode (Migration  "a" (MgNumber 5) "a5" ) $ CrossDeps []
+b1 = MgNode (Migration  "b" (MgNumber 1) "b1" ) $ CrossDeps []
+b2 = MgNode (Migration  "b" (MgNumber 2) "b2" ) $ CrossDeps [mc]
+b3 = MgNode (Migration  "b" (MgNumber 3) "b3" ) $ CrossDeps []
+b4 = MgNode (Migration  "b" (MgNumber 4) "b4" ) $ CrossDeps [drop 2 mc]
+c1 = MgNode (Migration  "c" (MgNumber 1) "c1" ) $ CrossDeps []
+c2 = MgNode (Migration  "c" (MgNumber 2) "c2" ) $ CrossDeps []
+c3 = MgNode (Migration  "c" (MgNumber 3) "c3" ) $ CrossDeps []
+c4 = MgNode (Migration  "c" (MgNumber 4) "c4" ) $ CrossDeps []
+c5 = MgNode (Migration  "c" (MgNumber 5) "c5" ) $ CrossDeps []
 
 ma = reverse [a1, a2, a3, a4, a5]
 mb = reverse [b1, b2, b3, b4]
