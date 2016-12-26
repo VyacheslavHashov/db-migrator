@@ -8,6 +8,7 @@ module Database.Migrator where
 
 import Data.Monoid
 import Data.Foldable
+import Data.List (sortOn)
 import qualified Data.Text as T
 import           Data.Text.Encoding (decodeUtf8)
 import qualified Data.Text.IO as T
@@ -20,6 +21,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad
 import Control.Monad.State
 import Control.Applicative
+import Data.Traversable (for)
 import Data.Char (isAlphaNum, isDigit, isSpace, toLower)
 import Data.Word
 import Data.List (break, stripPrefix)
@@ -137,15 +139,11 @@ data Error
     | CyclicDep
     -- | Migration exists on disk but was not applied in database
     | Unapplied
-    -- | Folder has more than one base migration
-    | MultipleBase
     -- | Unknown dependency
     | UnknownDep
     -- | Two different migration in folder have the same migration as previous
     -- In that case merge is need
     | NeedMerge
-    -- | Migration with that name already exists
-    | DuplicateName
     -- | Migration file has no SQl commands
     | EmptyMigration
     deriving (Show)
@@ -154,7 +152,12 @@ data Error
 data MigrationFileError
     = InvalidFilename FilePath
     | InvalidFoldername FilePath
+    -- TODO must be contain place and error description
     | InvalidHeader
+    -- | Migration with that name already exists
+    | DuplicateName
+    -- | Migration with expected name does not exist
+    | MissedMigration
     deriving (Show)
 
 -- | Errors in database with migrations
@@ -200,12 +203,41 @@ applyMigration :: IO ()
 applyMigration = undefined
 
 -----------------------------------------------------------
--- File system
+-- File Storage
 -----------------------------------------------------------
 
 type FileM = ExceptT MigrationFileError IO
 
--- TODO it does not check correctness of the nodes
+-- TODO switch from [RawMgNode] to NonEmpty RawMgNode since list always has
+-- at least one item
+
+readFromDisk :: FileM (M.Map MgFolder [RawMgNode])
+readFromDisk = validateRawNodes =<< readRawFromDisk
+
+-- TODO right docs
+  -- TODO tests for all cases
+  -- check that all the numbers go sequentally
+  -- check there are no duplicates
+-- Checks the consistency of the raw nodes and returns nodes in the correct
+-- order for build graph
+-- items in the list go in order:
+--   first entry should be applied first
+-- Numbers of the migrations in should be sequence
+-- 0000, 0001, 0002, 0003 etc.
+validateRawNodes
+    :: M.Map MgFolder [RawMgNode] -> FileM (M.Map MgFolder [RawMgNode])
+validateRawNodes = traverse $ \nodes -> do
+    let nodesSorted = sortOn getNumber nodes
+        -- TODO errors must contain name of migrations
+    for (zip nodesSorted numberSeq) $ \(node, eNumber) ->
+        case getNumber node `compare` eNumber of
+            LT -> throwError MissedMigration
+            GT -> throwError MissedMigration
+            EQ -> pure node
+  where
+    getNumber (RawMgNode mg _) = mgNumber mg
+    numberSeq = MgNumber <$> [0 .. ]
+
 -- TODO maybe raise warning if the items is not a folder and config file
 -- | Reads all the migrations from the disk, but not check for consistency
 readRawFromDisk :: FileM (M.Map MgFolder [RawMgNode])
