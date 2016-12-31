@@ -36,6 +36,11 @@ import qualified Text.Megaparsec as P
 import qualified Text.Megaparsec.Text as P
 import qualified Text.Megaparsec.Lexer as P (integer, skipLineComment)
 import Text.Megaparsec.Prim (MonadParsec)
+import Hasql.Query   as H
+import Hasql.Connection   as H
+import Hasql.Session as H
+import Hasql.Encoders as HE
+import Hasql.Decoders as HD
 
 -- | The sequental number of a migration.
 newtype MgNumber = MgNumber Word64
@@ -186,13 +191,71 @@ readConfig = undefined
 
 -- Reads migrations
 
+-----------------------------------------------------------
+-- Database
+-----------------------------------------------------------
 
 readFromDB :: IO (M.Map MgFolder RawMgNode)
 readFromDB = undefined
 
+readRawFromDB :: IO (M.Map MgFolder RawMgNode)
+readRawFromDB = undefined
+
+
+readQuery :: H.Query () [RawMgNode]
+readQuery = H.statement sql encoder decoder True
+  where
+    sql =
+        "SELECT m.folder, m.number, m.description, dep.dep_list          \
+        \    FROM migrator.migration as m                                \
+        \    LEFT JOIN                                                   \
+        \    (SELECT folder, number, array_agg(ROW(on_folder, on_number))\
+        \        as dep_list                                             \
+        \        FROM migrator.cross_dependency                          \
+        \        GROUP BY (folder, number)                               \
+        \        ORDER BY (folder, number)) as dep                       \
+        \    ON m.folder = dep.folder AND m.number = dep.number          \
+        \    ORDER BY folder;"
+    encoder = HE.unit
+    decoder = HD.rowsList $ do
+        mg <- Migration <$> (MgFolder <$> HD.value HD.text)
+                        <*> (MgNumber . fromIntegral  <$> HD.value HD.int4)
+                        <*> (MgDesc <$> HD.value HD.text)
+        deps <- fmap (fromMaybe []) . HD.nullableValue . HD.array .
+                HD.arrayDimension replicateM . HD.arrayValue . HD.composite $
+                    MigrationId <$> HD.compositeValue (MgFolder <$> HD.text)
+                                <*> HD.compositeValue
+                                    (MgNumber . fromIntegral <$>  HD.int4)
+        pure $ RawMgNode mg deps
+
 -- | Create table for migrations in database
-createMigrationTable :: IO ()
-createMigrationTable = undefined
+-- TODO choose schema name
+createMigrationTable :: H.Session ()
+createMigrationTable = H.sql sql
+  where
+    sql = "\
+        \ CREATE SCHEMA IF NOT EXISTS migrator;                     \
+        \ CREATE TABLE migrator.migration (                         \
+        \     folder      text        NOT NULL,                     \
+        \     number      integer     NOT NULL CHECK (number >= 0), \
+        \     description text        NOT NULL,                     \
+        \     applied_at  timestamptz NOT NULL DEFAULT NOW(),       \
+        \     content     text        NOT NULL,                     \
+        \                                                           \
+        \     PRIMARY KEY (folder, number)                          \
+        \ );                                                        \
+        \ CREATE TABLE IF NOT EXISTS migrator.cross_dependency (    \
+        \     folder text       NOT NULL,                           \
+        \     number integer    NOT NULL,                           \
+        \     on_folder text    NOT NULL,                           \
+        \     on_number integer NOT NULL,                           \
+        \                                                           \
+        \     FOREIGN KEY (folder, number)                          \
+        \         REFERENCES migrator.migration(folder, number),    \
+        \     FOREIGN KEY (on_folder, on_number)                    \
+        \         REFERENCES migrator.migration(folder, number),    \
+        \     CHECK (folder <> on_folder)                           \
+        \ );"
 
 -- | Apply migration in database
 -- Should be atomic operation:
@@ -218,6 +281,7 @@ readFromDisk = validateRawNodes =<< readRawFromDisk
   -- TODO tests for all cases
   -- check that all the numbers go sequentally
   -- check there are no duplicates
+-- TODO must check that cross dep does not refer to the same folder
 -- Checks the consistency of the raw nodes and returns nodes in the correct
 -- order for build graph
 -- items in the list go in order:
@@ -394,4 +458,14 @@ readAndPrintPlan = do
     case r of
         Left _ -> error "bad"
         Right g -> T.putStr . printPlan . getPlan . fst $ buildGraph g
+
+runQueryDb :: IO ()
+runQueryDb = do
+    rc <- H.acquire $ settings "" 5432 "v" "" "testdb"
+    case rc of
+        Left e -> print e
+        Right c -> do
+            r <- H.run (H.query () readQuery) c
+            -- r <- H.run createMigrationTable c
+            either print print r
 
